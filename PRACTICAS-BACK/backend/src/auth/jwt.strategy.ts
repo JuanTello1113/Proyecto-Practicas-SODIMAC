@@ -1,46 +1,26 @@
+// src/auth/jwt.strategy.ts
 import { Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
+import { Strategy as JwtStrategyBase, ExtractJwt, StrategyOptions } from 'passport-jwt';
 import { Request } from 'express';
-import { ExtractJwt, Strategy as JwtStrategyBase } from 'passport-jwt';
-
-interface JwtPayload {
-  correo: string;
-  id_usuario: number;
-  nombre: string;
-  rol: string;
-  esAdmin: boolean;
-  esNomina: boolean;
-  esJefe: boolean;
-  panelTitle: string;
-  userRoleTitle: string;
-  nombreTienda?: string;
-}
 
 @Injectable()
-export class JwtStrategy extends PassportStrategy(JwtStrategyBase) {
-  constructor(private readonly configService: ConfigService) {
-    super({
+export class JwtStrategy extends PassportStrategy(JwtStrategyBase, 'jwt') {
+  constructor() {
+    const opts: StrategyOptions = {
       jwtFromRequest: ExtractJwt.fromExtractors([
-        (req: Request): string | null => {
-          const cookies = req.cookies as { jwt?: string }; // ← tipado explícito
-          if (cookies?.jwt) return cookies.jwt;
-
-          const authHeader = req.headers.authorization;
-          if (authHeader?.startsWith('Bearer ')) {
-            return authHeader.slice(7);
-          }
-
-          return null;
-        },
+        (req: Request) => req?.cookies?.jwt ?? null,       // cookie httpOnly 'jwt'
+        ExtractJwt.fromAuthHeaderAsBearerToken(),           // opcional
       ]),
       ignoreExpiration: false,
-      secretOrKey: configService.get<string>('JWT_SECRET')!, // ← forzado aquí
-    });
+      secretOrKey: process.env.JWT_SECRET as string,        // <-- evitar string|undefined
+    };
+
+    super(opts);
   }
 
-  validate(payload: JwtPayload): JwtPayload {
-    console.log('✅ JWT validado con éxito:', payload);
+  // Lo que retornes aquí queda disponible en req.user
+  async validate(payload: any) {
     return payload;
   }
 }

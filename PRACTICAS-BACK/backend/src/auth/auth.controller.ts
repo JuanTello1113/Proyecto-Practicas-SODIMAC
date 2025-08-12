@@ -1,94 +1,52 @@
-import {
-  Body,
-  Controller,
-  Get,
-  Post,
-  Req,
-  Res,
-  UseGuards,
-} from '@nestjs/common';
+// src/auth/auth.controller.ts
+import { Body, Controller, Post, Get, Req, Res, UseGuards } from '@nestjs/common';
 import { Request, Response } from 'express';
-import { PrismaService } from 'prisma/prisma.service';
-import { UsuarioService } from 'src/usuario/services/usuario.service';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
 
-interface AuthenticatedRequest extends Request {
-  user: {
-    correo: string;
-    id_usuario: number;
-    nombre: string;
-    rol: string;
-    esAdmin: boolean;
-    esJefe: boolean;
-    esNomina: boolean;
-    panelTitle: string;
-    userRoleTitle: string;
-    nombreTienda?: string;
-    iat: number;
-  };
+class AdminLoginDto {
+  email!: string;
 }
 
 @Controller('auth')
 export class AuthController {
-  constructor(
-    private readonly authService: AuthService,
-    private readonly usuarioService: UsuarioService,
-    private readonly prisma: PrismaService,
-  ) {}
+  constructor(private readonly authService: AuthService) {}
 
-  // Login con Google
-  @Post('google')
-  async loginWithGoogle(
-    @Body('token') googleToken: string,
+  // Login manual por correo (solo ADMIN registrado en DB)
+  @Post('admin-login')
+  async adminLogin(
+    @Body() { email }: AdminLoginDto,
     @Req() req: Request,
-    @Res({ passthrough: true }) response: Response,
+    @Res({ passthrough: true }) res: Response,
   ) {
-    const ipRaw = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-    const ip = Array.isArray(ipRaw) ? ipRaw[0] : (ipRaw ?? '');
+    // x-forwarded-for puede ser string|string[]|undefined
+    const xff = req.headers['x-forwarded-for'] as string | string[] | undefined;
+    const ip = (Array.isArray(xff) ? xff[0] : xff) ?? req.socket.remoteAddress ?? '';
 
-    const { token, user } = await this.authService.loginWithGoogle(
-      googleToken,
-      ip,
-    );
+    const { token, user } = await this.authService.adminLogin(email, ip);
 
-    response.cookie('jwt', token, {
+    // Seteamos cookie httpOnly con el JWT
+    res.cookie('jwt', token, {
       httpOnly: true,
-      secure: false, // localhost
-      maxAge: 1000 * 60 * 60 * 24,
+      secure: false, // true en producción con HTTPS
       sameSite: 'lax',
+      maxAge: 24 * 60 * 60 * 1000, // 1 día
       path: '/',
     });
 
-    return {
-      message: 'Inicio de sesión exitoso',
-      user,
-    };
+    return { message: 'Inicio de sesión exitoso', user };
   }
 
-  // Obtener perfil del usuario desde el AuthService
+  // Perfil (requiere JWT válido en cookie 'jwt' o Bearer)
   @UseGuards(JwtAuthGuard)
   @Get('profile')
-  async getProfile(@Req() req: AuthenticatedRequest) {
-    const { id_usuario } = req.user;
-
-    const user = await this.authService.getProfile(id_usuario);
-
-    if (!user) {
-      return {
-        message: 'Usuario no encontrado',
-      };
-    }
-
-    return {
-      message: 'Perfil cargado correctamente',
-      user,
-    };
+  getProfile(@Req() req: Request) {
+    return { user: (req as any).user };
   }
 
-  // Logout
-  @Post('logout')
+  // Logout: borra la cookie
   @UseGuards(JwtAuthGuard)
+  @Post('logout')
   logout(@Res({ passthrough: true }) res: Response) {
     res.clearCookie('jwt', {
       httpOnly: true,
@@ -97,34 +55,5 @@ export class AuthController {
       path: '/',
     });
     return { message: 'Sesión cerrada correctamente' };
-  }
-
-  @Post('login-email')
-  async loginByEmail(
-    @Body('email') email: string,
-    @Req() req: Request,
-    @Res({ passthrough: true }) res: Response,
-  ) {
-    if (!email) {
-      return { message: 'Falta el correo' };
-    }
-
-    const ipRaw = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-    const ip = Array.isArray(ipRaw) ? ipRaw[0] : (ipRaw ?? '');
-
-    const { token, user } = await this.authService.loginByEmail(email, ip);
-
-    res.cookie('jwt', token, {
-      httpOnly: true,
-      secure: false,
-      maxAge: 1000 * 60 * 60 * 24,
-      sameSite: 'lax',
-      path: '/',
-    });
-
-    return {
-      message: 'Inicio de sesión exitoso',
-      user,
-    };
   }
 }

@@ -1,26 +1,10 @@
-import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { Injectable, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import axios from 'axios';
-import { PrismaService } from '../../prisma/prisma.service';
+import { PrismaService } from 'prisma/prisma.service';
 
-interface GeoLocationResponse {
-  status: 'success' | 'fail';
-  country: string;
-  regionName: string;
-  city: string;
-  query: string; // IP
-}
-
-interface GoogleUser {
-  email: string;
-  name: string;
-  picture: string;
-}
-
-interface JwtPayload {
-  correo: string;
+type JwtPayload = {
   id_usuario: number;
+  correo: string;
   nombre: string;
   rol: string;
   esAdmin: boolean;
@@ -29,298 +13,166 @@ interface JwtPayload {
   panelTitle: string;
   userRoleTitle: string;
   nombreTienda?: string;
-}
+};
 
 @Injectable()
-eloginWithGoogle
-xport class AuthService {
+export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly jwtService: JwtService,
-    private readonly configService: ConfigService,
+    private readonly jwt: JwtService,
   ) {}
 
-  private getPanelTitles(rol: string, nombreTienda?: string) {
-    const rolLimpio = rol.trim().toLowerCase().replace(/\s+/g, ' ');
+  /**
+   * Login manual para ADMIN por correo corporativo
+   */
+  async adminLogin(email: string, ip?: string) {
+  // 1) Normaliza el correo recibido
+  const cleanEmail = (email ?? '').trim().toLowerCase();
+  console.log('[Auth] intento adminLogin', { emailIn: email, cleanEmail });
 
-    switch (rolLimpio) {
-      case 'administrador':
-        return {
-          panelTitle: 'Panel Adminsitración',
-          userRoleTitle: 'Administrador',
-        };
-      case 'gestor de nomina':
-        return {
-          panelTitle: 'Panel de Nómina',
-          userRoleTitle: 'Gestor de Nómina',
-        };
-      case 'jefe de tienda':
-        return {
-          panelTitle: nombreTienda ? `Panel de ${nombreTienda}` : 'Panel Jefe',
-          userRoleTitle: nombreTienda
-            ? `Jefe de ${nombreTienda}`
-            : 'Jefe de Tienda',
-        };
-      default:
-        return {
-          panelTitle: 'No disponible',
-          userRoleTitle: 'No disponible',
-        };
-    }
-  }
+  // 2) Busca insensible a mayúsculas/minúsculas y con estado=true
+  const user = await this.prisma.usuario.findFirst({
+    where: {
+      correo: { equals: cleanEmail, mode: 'insensitive' },
+      estado: true,
+    },
+    include: {
+      usuario_rol: { include: { rol: true } },
+      usuario_tienda: { include: { tienda: true } },
+    },
+  });
 
-  async validateGoogleToken(googleToken: string): Promise<GoogleUser> {
-    const url = `https://oauth2.googleapis.com/tokeninfo?id_token=${googleToken}`;
-
-    try {
-      const response = await axios.get<GoogleUser>(url);
-      return response.data;
-    } catch {
-      throw new HttpException(
-        'Token de Google inválido',
-        HttpStatus.UNAUTHORIZED,
-      );
-    }
-  }
-
-  async getUbicacionDesdeIP(ip: string): Promise<string> {
-    try {
-      const response = await axios.get<GeoLocationResponse>(
-        `http://ip-api.com/json/${ip}`,
-      );
-      const data: GeoLocationResponse = response.data;
-
-      if (data.status === 'success') {
-        return `${data.city}, ${data.country}`;
-      } else {
-        return 'Ubicación desconocida';
-      }
-    } catch (error: unknown) {
-      if (error instanceof Error) {
-        console.warn('No se pudo obtener la ubicación por IP:', error.message);
-      } else {
-        console.warn(
-          'No se pudo obtener la ubicación por IP:',
-          JSON.stringify(error),
-        );
-      }
-      return 'Ubicación desconocida';
-    }
-  }
-
-  async loginWithGoogle(googleToken: string, ip: string) {
-    const googleUser = await this.validateGoogleToken(googleToken);
-    const user = await this.prisma.usuario.findUnique({
-      where: { correo: googleUser.email },
-    });
-
-    if (!user)
-      throw new HttpException('Usuario no encontrado', HttpStatus.NOT_FOUND);
-
-    const ubicacion = await this.getUbicacionDesdeIP(ip);
-
-    await this.prisma.usuario.update({
-      where: { id_usuario: user.id_usuario },
-      data: {
-        ultima_actividad: new Date(),
-        ip_ultima_conexion: ip.toString(),
-        ubicacion,
-      },
-    });
-
-    const userRole = await this.prisma.usuario_rol.findFirst({
-      where: { id_usuario: user.id_usuario },
-      include: { rol: true },
-    });
-
-    if (!userRole || !userRole.rol) {
-      throw new HttpException(
-        'No tiene permiso para ingresar',
-        HttpStatus.FORBIDDEN,
-      );
-    }
-
-    const rolNombre = userRole.rol.nombre_rol
-      .trim()
-      .toLowerCase()
-      .replace(/\s+/g, ' ');
-
-    const esAdmin = rolNombre === 'administrador';
-    const esNomina = rolNombre === 'gestor de nomina';
-    const esJefe = rolNombre === 'jefe de tienda';
-
-    let nombreTienda: string | undefined = undefined;
-    if (esJefe) {
-      const TiendaJefe = await this.prisma.usuario.findUnique({
-        where: { id_usuario: user.id_usuario },
-        include: {
-          usuario_tienda: {
-            include: {
-              tienda: true,
-            },
-          },
-        },
-      });
-      nombreTienda = TiendaJefe?.usuario_tienda[0]?.tienda?.nombre_tienda;
-    }
-
-    const { panelTitle, userRoleTitle } = this.getPanelTitles(
-      userRole.rol.nombre_rol,
-      nombreTienda,
+  if (!user) {
+    await this.safeLog(
+      'LOGIN_ADMIN_FAIL',
+      `Usuario no encontrado | correo=${cleanEmail} | ip=${ip ?? 'desconocida'}`,
     );
-
-    const payload: JwtPayload = {
-      correo: user.correo,
-      id_usuario: user.id_usuario,
-      nombre: user.nombre,
-      rol: userRole.rol.nombre_rol,
-      esAdmin,
-      esNomina,
-      esJefe,
-      panelTitle,
-      userRoleTitle,
-      nombreTienda,
-    };
-
-    const jwtSecret = this.configService.get<string>('JWT_SECRET');
-    const token = this.jwtService.sign(payload, { secret: jwtSecret });
-
-    console.log('🧩 Rol limpio: ', rolNombre);
-    console.log('Nombre que devuelve backend: ', user.nombre);
-    console.log('Tienda Asignada: ', nombreTienda);
-    console.log('Titulo Generado: ', panelTitle);
-    console.log('Playload JWT que se genera: ', payload);
-
-    return {
-      token,
-      user: {
-        nombre: user.nombre,
-        correo: user.correo,
-        id_usuario: user.id_usuario,
-        rol: userRole.rol.nombre_rol,
-        esAdmin,
-        esNomina,
-        esJefe,
-        panelTitle,
-        userRoleTitle,
-        nombreTienda,
-      },
-    };
+    throw new UnauthorizedException('Usuario no autorizado.');
   }
 
+  // 3) Normaliza roles (lowercase + trim)
+  const rolesNorm = (user.usuario_rol ?? [])
+    .map((ur: any) => (ur.rol?.nombre_rol ?? '').toString().toLowerCase().trim())
+    .filter(Boolean);
 
-  async loginByEmail(email: string, ip: string) {
-    const user = await this.prisma.usuario.findUnique({
-      where: { correo: email },
-    });
+  const esAdmin = rolesNorm.includes('admin');
 
-    if (!user) {
-      throw new HttpException('Usuario no encontrado', HttpStatus.NOT_FOUND);
-    }
+  // Log de diagnóstico
+  console.log('[Auth] roles encontrados', {
+    raw: (user.usuario_rol ?? []).map((ur: any) => ur.rol?.nombre_rol),
+    norm: rolesNorm,
+    esAdmin,
+  });
 
-    const ubicacion = await this.getUbicacionDesdeIP(ip);
-
-    await this.prisma.usuario.update({
-      where: { id_usuario: user.id_usuario },
-      data: {
-        ultima_actividad: new Date(),
-        ip_ultima_conexion: JSON.stringify(ubicacion),
-        ubicacion,
-      },
-    });
-
-    const userRole = await this.prisma.usuario_rol.findFirst({
-      where: { id_usuario: user.id_usuario },
-      include: { rol: true },
-    });
-
-    if (
-      !userRole ||
-      !userRole.rol ||
-      userRole.rol.nombre_rol.trim().toLowerCase().replace(/\s+/g, ' ') !== 'admin'
-    ) {
-      throw new HttpException(
-        'No tiene permiso para ingresar',
-        HttpStatus.FORBIDDEN,
-      );
-    }
-
-    const rolNombre = userRole.rol.nombre_rol.trim().toLowerCase().replace(/\s+/g, ' ');
-    const esAdmin = true;
-    const esNomina = false;
-    const esJefe = false;
-
-    const { panelTitle, userRoleTitle } = this.getPanelTitles(
-      rolNombre,
-      ubicacion?.nombre_tienda ?? '',
+  if (!esAdmin) {
+    await this.safeLog(
+      'LOGIN_ADMIN_DENY',
+      `Usuario sin rol ADMIN | correo=${user.correo} | roles=${rolesNorm.join(',')} | ip=${ip ?? 'desconocida'}`,
     );
+    throw new ForbiddenException('Acceso restringido a usuarios con rol ADMIN.');
+  }
 
-    const payload: JwtPayload = {
-      correo: user.correo,
-      id_usuario: user.id_usuario,
-      nombre: user.nombre,
-      rol: rolNombre,
-      esAdmin,
-      esNomina,
-      esJefe,
-      panelTitle,
-      userRoleTitle,
-      nombreTienda2: ubicacion?.nombre_tienda ?? '',
-    };
+  // 4) Construye el payload con datos normalizados
+  const payload = this.buildPayloadFromUser(user);
 
-    const jwtSecret = this.configService.get<string>('JWT_SECRET');
-    const token = await this.jwtService.signAsync(payload, {
-      secret: jwtSecret,
-      expiresIn: this.configService.get<string>('JWT_EXPIRES_IN'),
-    });
+  // 5) Firma el JWT con vars .env
+  const token = await this.jwt.signAsync(payload, {
+    secret: (process.env.JWT_SECRET as string) ?? 'secret',
+    expiresIn: process.env.JWT_EXPIRES_IN ?? '1d',
+  });
 
-    return {
-      token,
-      user: payload,
-    };
-  
+  // 6) Log informativo (usa solo campos del modelo correo_log)
+  await this.safeLog(
+    'LOGIN_ADMIN',
+    `Login ADMIN manual | correo=${user.correo} | ip=${ip ?? 'desconocida'}`,
+  );
+
+  return { token, user: payload };
+}
+
+  /**
+   * Devuelve el perfil normalizado desde DB
+   */
+  async getProfile(id_usuario: number) {
     const user = await this.prisma.usuario.findUnique({
       where: { id_usuario },
       include: {
-        usuario_rol: {
-          include: { rol: true },
-        },
-        usuario_tienda: {
-          include: { tienda: true },
-        },
+        usuario_rol: { include: { rol: true } },
+        usuario_tienda: { include: { tienda: true } },
       },
     });
+    if (!user) return null;
+    return this.buildPayloadFromUser(user);
+  }
 
-    if (!user) {
-      throw new HttpException('Usuario no encontrado', HttpStatus.NOT_FOUND);
-    }
+  /**
+   * Construye el payload a partir del usuario de BD
+   */
+  private buildPayloadFromUser(user: any): JwtPayload {
+    const nombreTienda =
+      user?.usuario_tienda &&
+      Array.isArray(user.usuario_tienda) &&
+      user.usuario_tienda.length > 0 &&
+      user.usuario_tienda[0]?.tienda
+        ? user.usuario_tienda[0].tienda.nombre
+        : undefined;
 
-    const rol = user.usuario_rol[0]?.rol?.nombre_rol ?? '';
-    const rolLimpio = rol.trim().toLowerCase().replace(/\s+/g, ' ');
-    const esJefe = rolLimpio === 'jefe de tienda';
-    const esAdmin = rolLimpio === 'administrador';
-    const esNomina = rolLimpio === 'gestor de nomina';
+    const rolesNorm = (user.usuario_rol ?? [])
+      .map((ur: any) => ur.rol?.nombre_rol?.toLowerCase?.() ?? '')
+      .filter(Boolean);
 
-    const nombreTienda = esJefe
-      ? user.usuario_tienda?.[0]?.tienda?.nombre_tienda
-      : undefined;
+    const esAdmin = rolesNorm.includes('admin');
+    const esNomina = rolesNorm.includes('nomina');
+    const esJefe =
+      rolesNorm.includes('jefe') ||
+      rolesNorm.includes('jefe_tienda') ||
+      rolesNorm.includes('jefe tienda');
 
-    const { panelTitle, userRoleTitle } = this.getPanelTitles(
-      rol,
-      nombreTienda,
-    );
+    const rolPrincipal = esAdmin
+      ? 'ADMIN'
+      : rolesNorm[0]
+      ? rolesNorm[0].toUpperCase()
+      : 'USUARIO';
+
+    const panelTitle = esAdmin
+      ? 'Administrador'
+      : esNomina
+      ? 'Nómina'
+      : esJefe
+      ? 'Jefe'
+      : 'Usuario';
 
     return {
-      nombre: user.nombre,
-      correo: user.correo,
       id_usuario: user.id_usuario,
-      rol,
+      correo: user.correo,
+      nombre: user.nombre,
+      rol: rolPrincipal,
       esAdmin,
       esNomina,
       esJefe,
       panelTitle,
-      userRoleTitle,
+      userRoleTitle: panelTitle,
       nombreTienda,
     };
+  }
+
+  /**
+   * Crea un registro en correo_log usando el modelo real
+   * estado_envio: varchar(50)
+   * mensaje_error: string libre
+   */
+  private async safeLog(estado_envio: string, mensaje: string) {
+    try {
+      await this.prisma.correo_log.create({
+        data: {
+          estado_envio: estado_envio.slice(0, 50),
+          mensaje_error: mensaje,
+          // fecha_envio se asigna por @default(now())
+          // id_notificacion se deja nulo si no aplica
+        },
+      });
+    } catch {
+      // No romper el flujo si el log falla
+    }
   }
 }
