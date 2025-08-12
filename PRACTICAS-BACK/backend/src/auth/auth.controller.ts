@@ -98,4 +98,33 @@ export class AuthController {
     });
     return { message: 'Sesión cerrada correctamente' };
   }
+
+  @Post('login-email')
+  async loginByEmail(
+    @Body('email') email: string,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    if (!email) {
+      return { message: 'Falta el correo' };
+    }
+
+    const ipRaw = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    const ip = Array.isArray(ipRaw) ? ipRaw[0] : (ipRaw ?? '');
+
+    const { token, user } = await this.authService.loginByEmail(email, ip);
+
+    res.cookie('jwt', token, {
+      httpOnly: true,
+      secure: false,
+      maxAge: 1000 * 60 * 60 * 24,
+      sameSite: 'lax',
+      path: '/',
+    });
+
+    return {
+      message: 'Inicio de sesión exitoso',
+      user,
+    };
+  }
 }

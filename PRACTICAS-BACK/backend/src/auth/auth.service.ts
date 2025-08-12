@@ -32,7 +32,8 @@ interface JwtPayload {
 }
 
 @Injectable()
-export class AuthService {
+eloginWithGoogle
+xport class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
@@ -207,7 +208,77 @@ export class AuthService {
     };
   }
 
-  async getProfile(id_usuario: number) {
+
+  async loginByEmail(email: string, ip: string) {
+    const user = await this.prisma.usuario.findUnique({
+      where: { correo: email },
+    });
+
+    if (!user) {
+      throw new HttpException('Usuario no encontrado', HttpStatus.NOT_FOUND);
+    }
+
+    const ubicacion = await this.getUbicacionDesdeIP(ip);
+
+    await this.prisma.usuario.update({
+      where: { id_usuario: user.id_usuario },
+      data: {
+        ultima_actividad: new Date(),
+        ip_ultima_conexion: JSON.stringify(ubicacion),
+        ubicacion,
+      },
+    });
+
+    const userRole = await this.prisma.usuario_rol.findFirst({
+      where: { id_usuario: user.id_usuario },
+      include: { rol: true },
+    });
+
+    if (
+      !userRole ||
+      !userRole.rol ||
+      userRole.rol.nombre_rol.trim().toLowerCase().replace(/\s+/g, ' ') !== 'admin'
+    ) {
+      throw new HttpException(
+        'No tiene permiso para ingresar',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
+    const rolNombre = userRole.rol.nombre_rol.trim().toLowerCase().replace(/\s+/g, ' ');
+    const esAdmin = true;
+    const esNomina = false;
+    const esJefe = false;
+
+    const { panelTitle, userRoleTitle } = this.getPanelTitles(
+      rolNombre,
+      ubicacion?.nombre_tienda ?? '',
+    );
+
+    const payload: JwtPayload = {
+      correo: user.correo,
+      id_usuario: user.id_usuario,
+      nombre: user.nombre,
+      rol: rolNombre,
+      esAdmin,
+      esNomina,
+      esJefe,
+      panelTitle,
+      userRoleTitle,
+      nombreTienda2: ubicacion?.nombre_tienda ?? '',
+    };
+
+    const jwtSecret = this.configService.get<string>('JWT_SECRET');
+    const token = await this.jwtService.signAsync(payload, {
+      secret: jwtSecret,
+      expiresIn: this.configService.get<string>('JWT_EXPIRES_IN'),
+    });
+
+    return {
+      token,
+      user: payload,
+    };
+  
     const user = await this.prisma.usuario.findUnique({
       where: { id_usuario },
       include: {
