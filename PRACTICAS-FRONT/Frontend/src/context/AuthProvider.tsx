@@ -1,87 +1,72 @@
+import React, { ReactNode, useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
-import { ReactNode, useCallback, useEffect, useState } from 'react';
+import { AuthContext, AuthContextType, User } from './AuthContext';
 import SplashScreen from '../components/Loading/SplashScreen';
-import { AuthContext, AuthContextType } from './AuthContext';
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<AuthContextType['user']>(null);
   const [loading, setLoading] = useState(true);
-  const [splashVisible, setSplashVisible] = useState(false);
+
+  // Control del splash inicial
+  const [splashVisible, setSplashVisible] = useState(true);
 
   useEffect(() => {
-    const checkSession = async () => {
-      try {
-        const response = await axios.get('http://localhost:3000/auth/profile', {
-          withCredentials: true,
-        });
-        setUser(response.data.user);
-      } catch (error) {
-        console.error('No hay sesión activa o el token expiró.', error);
-        setUser(null);
-      } finally {
-        setLoading(false);
-      }
-    };
+  const MIN_SPLASH_MS = 3000; 
+  const start = Date.now();
 
-    checkSession();
-  }, []);
-
-  // Función para mostrar splash
-  const showSplash = useCallback((reason: string) => {
-    console.log('Mostrando splash por:', reason);
-    setSplashVisible(true);
-
-    const timeout = setTimeout(() => {
-      setSplashVisible(false);
-    }, 4500);
-
-    return () => clearTimeout(timeout);
-  }, []);
-
-  useEffect(() => {
-    if (!loading) {
-      const hasShownSplash = sessionStorage.getItem('splashShown');
-      const isLoginPage = window.location.pathname === '/';
-
-      // Solo mostrar splash en login si no se ha mostrado antes (refresh o primera vez)
-      if (isLoginPage && !hasShownSplash) {
-        showSplash('login-first-time');
-      }
-      // Primera visita a la app (no login)
-      else if (!hasShownSplash && !isLoginPage) {
-        showSplash('first-visit');
-        sessionStorage.setItem('splashShown', 'true');
-      }
-    }
-  }, [loading, showSplash]);
-
-  const logout = async () => {
+  const checkSession = async () => {
     try {
-      // Mostrar splash inmediatamente al hacer logout
-      showSplash('logout');
-
-      await axios.post('http://localhost:3000/auth/logout', null, {
-        withCredentials: true,
-      });
-    } catch (error) {
-      console.error('error al cerrar sesión:', error);
-    } finally {
-      //  Limpiar sesión local
+      const { data } = await axios.get('/auth/profile', { withCredentials: true });
+      setUser(data.user);
+    } catch {
       setUser(null);
-      sessionStorage.clear();
-
-      // Limpiar el flag del splash al hacer logout para que aparezca en el próximo login
-      sessionStorage.removeItem('splashShown');
+    } finally {
+      setLoading(false);
+      const spent = Date.now() - start;
+      const left  = Math.max(0, MIN_SPLASH_MS - spent);
+      setTimeout(() => setSplashVisible(false), left);
     }
   };
 
-  return (
-    <AuthContext.Provider value={{ user, setUser, logout, loading }}>
-      {children}
+  checkSession();
+}, []);
 
+
+  const login = async (email: string) => {
+    await axios.post('/auth/admin-login', { email }, { withCredentials: true, timeout: 5000 });
+    const { data } = await axios.get<{ user: User }>('/auth/profile', {
+      withCredentials: true,
+      timeout: 5000,
+    });
+    setUser(data.user);
+    return data.user;
+  };
+
+  const logout = async () => {
+    try {
+      await axios.post('/auth/logout', {}, { withCredentials: true, timeout: 5000 });
+    } finally {
+      setUser(null);
+    }
+  };
+
+  const value = useMemo<AuthContextType>(() => ({
+    user,
+    loading,
+    login,
+    logout,
+  }), [user, loading]);
+
+  return (
+    <AuthContext.Provider value={value}>
+      {/* Muestra el overlay mientras está visible */}
       {splashVisible && (
-        <SplashScreen visible={splashVisible} onFinish={() => {}} />
+        <SplashScreen
+          visible={true}
+          onFinish={() => setSplashVisible(false)} // por si tu componente dispara onFinish
+        />
       )}
+      {children}
     </AuthContext.Provider>
   );
 };

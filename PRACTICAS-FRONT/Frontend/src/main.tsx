@@ -1,22 +1,23 @@
-// src/main.tsx
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import App from './App';
 import './index.css';
-import { GoogleOAuthProvider } from '@react-oauth/google';
-import { AuthProvider } from './context/AuthProvider';
 import 'react-datepicker/dist/react-datepicker.css';
+
+import { AuthProvider } from './context/AuthProvider';
+
+// Config global de axios (evita URLs hardcodeadas)
 import axios from 'axios';
 axios.defaults.withCredentials = true;
+axios.defaults.baseURL =
+  (import.meta as any)?.env?.VITE_API_URL ?? 'http://localhost:3000';
 
-const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID as string;
+// Si aún tienes GoogleOAuthProvider y no lo usas, puedes quitarlo sin problema.
+import App from './App';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <GoogleOAuthProvider clientId={clientId}>
-      <AuthProvider>
-        <App />
-      </AuthProvider>
-    </GoogleOAuthProvider>
-  </React.StrictMode>,
+    <AuthProvider>
+      <App />
+    </AuthProvider>
+  </React.StrictMode>
 );

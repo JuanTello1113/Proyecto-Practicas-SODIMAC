@@ -1,28 +1,31 @@
-import { createContext } from 'react';
+import React, { createContext } from 'react';
 
-//Tipo Usuario
-export interface User {
+export type User = {
+  id: number;
   nombre: string;
   correo: string;
-  id_usuario: number;
-  rol: string;
-  esAdmin: boolean;
-  esNomina: boolean;
-  esJefe: boolean;
-  panelTitle: string;
-  userRoleTitle: string;
-  nombreTienda: string;
-}
+  esAdmin?: boolean;
+  esNomina?: boolean;
+  esJefe?: boolean;
+  tiendaNombre?: string | null;
+  roles?: string[];
+};
 
-//Tipo Contexto
 export interface AuthContextType {
   user: User | null;
-  setUser: (user: User | null) => void;
-  logout: () => void;
   loading: boolean;
+  login: (email: string) => Promise<User>;
+  logout: () => Promise<void>;
 }
 
-//  exportamos el contexto
-export const AuthContext = createContext<AuthContextType | undefined>(
-  undefined,
-);
+export const AuthContext = createContext<AuthContextType>({
+  user: null,
+  loading: true,
+  // defaults seguros; se reemplazan en el Provider
+  login: async () => {
+    throw new Error('AuthContext.login no inicializado');
+  },
+  logout: async () => {
+    throw new Error('AuthContext.logout no inicializado');
+  },
+});
