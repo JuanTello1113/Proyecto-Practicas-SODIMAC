@@ -1,33 +1,27 @@
-import React from 'react';
-import { Navigate, Outlet } from 'react-router-dom';
-import { useAuth } from '../context/useAuth';
+// PRACTICAS-FRONT/Frontend/src/routes/ProtectedRoute.tsx
+import { Navigate, Outlet, useLocation } from 'react-router-dom';
+import useAuth from '../context/useAuth';
 
-interface ProtectedRouteProps {
-  allowedRoles: string[];
+type Props = { allowedRoles?: string[] };
+
+function matchRole(user: any, allowed: string[]) {
+  if (!user) return false;
+  const need = allowed.map((r) => r.toLowerCase().trim());
+  const flags = new Set<string>();
+  if (user.esAdmin) flags.add('admin');
+  if (user.esNomina) flags.add('nomina');
+  if (user.esJefe) flags.add('jefe');
+  const arr = (user.roles ?? []).map((r: string) => r.toLowerCase().trim());
+  return need.some((r) => flags.has(r) || arr.includes(r));
 }
 
-const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ allowedRoles }) => {
+export default function ProtectedRoute({ allowedRoles = [] }: Props) {
   const { user, loading } = useAuth();
+  const location = useLocation();
 
-  if (loading) return null;
+  if (loading) return null; // o tu spinner
 
-  if (!user) {
-    return <Navigate to="/" replace />; //No login
-  }
+  if (matchRole(user, allowedRoles)) return <Outlet />;
 
-  console.log('user object:', user);
-
-  let userRole = '';
-  if (user.rol === 'Administrador') userRole = 'admin';
-  else if (user.rol === 'Gestor de Nomina') userRole = 'nomina';
-  else if (user.rol === 'Jefe de Tienda') userRole = 'jefe';
-
-  if (!allowedRoles.includes(userRole)) {
-    console.log('user role:', userRole, 'allowed roles:', allowedRoles);
-    return <Navigate to="/unauthorized" replace />; //Sin permisos de rol
-  }
-
-  return <Outlet />;
-};
-
-export default ProtectedRoute;
+  return <Navigate to="/unauthorized" replace state={{ from: location }} />;
+}

@@ -1,5 +1,5 @@
-import axios from 'axios';
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   FaBell,
   FaUserCheck,
@@ -7,46 +7,67 @@ import {
   FaUsers,
   FaUserShield,
 } from 'react-icons/fa';
-import { useNavigate } from 'react-router-dom';
+
 import Franco from '../../../assets/images/Franco_Pensando_1-removebg-preview.png';
-import FormCrearUsuario from '../../../components/Alerts/AlerFormCrearUser';
-import Card from '../../../components/Cards/card';
-import Footer from '../../../components/Footer/Footer';
 import Navbar from '../../../components/Navbar/Navbar';
+import Footer from '../../../components/Footer/Footer';
+import Card from '../../../components/Cards/card';
+import FormCrearUsuario from '../../../components/Alerts/AlerFormCrearUser';
 import { useAuth } from '../../../context/useAuth';
+
+// ⬇️ nuevo: usamos el servicio que pega a la API (baseURL = VITE_API_URL)
+import { crearUsuario } from '../../../services/usuarioService';
+
+type FormCrearUsuarioPayload = {
+  nombre: string;
+  correo: string;
+  rol: string;       // 'ADMIN' | 'NOMINA' | 'JEFE' (según lo que envíe tu modal)
+  esJefe: boolean;
+  tienda?: number;   // opcional si es jefe
+};
 
 const DashboardAdministrador: React.FC = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
+
   const [mostrarFormulario, setMostrarFormulario] = useState(false);
+  const [enviando, setEnviando] = useState(false);
 
-  const handleCrearUsuario = async (formData: {
-    nombre: string;
-    correo: string;
-    rol: string;
-    esJefe: boolean;
-    tienda?: number;
-  }) => {
+  const handleCrearUsuario = async (formData: FormCrearUsuarioPayload) => {
     try {
-      const payload = {
-        nombre: formData.nombre,
-        correo: formData.correo,
-        rol: formData.rol,
-        tienda: formData.esJefe ? formData.tienda : undefined,
-      };
+      setEnviando(true);
 
-      await axios.post('/usuario', payload);
+      // Normaliza campos
+      await crearUsuario({
+        nombre: formData.nombre.trim(),
+        correo: formData.correo.trim().toLowerCase(),
+        rol: formData.rol as any, // tipa si lo prefieres con union type
+        esJefe: formData.esJefe,
+        tienda: formData.esJefe ? formData.tienda ?? null : null,
+      });
+
       alert('✅ Usuario creado correctamente');
       setMostrarFormulario(false);
-    } catch (err) {
-      console.error('❌ Error al crear usuario:', err);
-      alert('Error al crear usuario');
+
+      // Si quieres, refresca o navega a listados:
+      // navigate('/usuarios-registrados');
+    } catch (err: any) {
+      // Muestra el mensaje que venga del backend si existe
+      const msg =
+        err?.response?.data?.message ||
+        err?.response?.data?.error ||
+        'Error al crear usuario';
+      console.error('❌ Error al crear usuario:', err?.response?.data || err);
+      alert(msg);
+    } finally {
+      setEnviando(false);
     }
   };
 
   return (
     <div className="min-h-screen w-screen flex flex-col bg-white">
       <Navbar />
+
       <main className="flex-grow px-8 pt-8 pb-4">
         <div className="flex justify-between mb-6">
           <div>
@@ -58,6 +79,7 @@ const DashboardAdministrador: React.FC = () => {
               monitorear su rendimiento.
             </p>
           </div>
+
           <div className="w-1/3 flex justify-center mt-2">
             <h2 className="text-xl font-bold text-black">
               Acciones que puedes realizar
@@ -66,6 +88,7 @@ const DashboardAdministrador: React.FC = () => {
         </div>
 
         <div className="flex justify-between pl-6">
+          {/* Columna izquierda */}
           <div className="flex flex-col w-1/3 mt-28 pt-4">
             <div className="flex justify-between mb-4 gap-8">
               <Card
@@ -85,6 +108,7 @@ const DashboardAdministrador: React.FC = () => {
             </div>
           </div>
 
+          {/* Columna central (mascota) */}
           <div className="w-1/3 flex justify-center items-center pl-32">
             <img
               src={Franco}
@@ -93,6 +117,7 @@ const DashboardAdministrador: React.FC = () => {
             />
           </div>
 
+          {/* Columna derecha: acciones */}
           <div className="w-1/3 pl-5 flex flex-col space-y-8 items-center">
             <Card
               title="Registrar Usuario"
@@ -125,6 +150,8 @@ const DashboardAdministrador: React.FC = () => {
         <FormCrearUsuario
           onClose={() => setMostrarFormulario(false)}
           onCrear={handleCrearUsuario}
+          // si tu modal acepta prop "loading", descomenta:
+          // loading={enviando}
         />
       )}
     </div>

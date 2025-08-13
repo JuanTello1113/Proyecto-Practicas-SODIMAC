@@ -1,19 +1,40 @@
-import { Injectable, ForbiddenException, UnauthorizedException } from '@nestjs/common';
+// backend/src/auth/auth.service.ts
+import {
+  Injectable,
+  ForbiddenException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { PrismaService } from 'prisma/prisma.service';
+import { PrismaService } from '../../prisma/prisma.service';
 
-type JwtPayload = {
-  id_usuario: number;
-  correo: string;
+export type SafeUser = {
+  id: number;
   nombre: string;
-  rol: string;
+  correo: string;
   esAdmin: boolean;
   esNomina: boolean;
   esJefe: boolean;
-  panelTitle: string;
-  userRoleTitle: string;
-  nombreTienda?: string;
+  roles: string[];
+  tiendaNombre?: string | null;
 };
+
+export type LoginResult = { token: string; user: SafeUser };
+
+/**
+ * Utilidades para extraer roles de estructuras cambiantes
+ */
+function pickStrings(obj: any, keys: string[]): string[] {
+  const out: string[] = [];
+  for (const k of keys) {
+    const v = obj?.[k];
+    if (typeof v === 'string' && v.trim() !== '') out.push(v);
+  }
+  return out;
+}
+
+function uniq<T>(arr: T[]): T[] {
+  return Array.from(new Set(arr));
+}
 
 @Injectable()
 export class AuthService {
@@ -23,156 +44,151 @@ export class AuthService {
   ) {}
 
   /**
-   * Login manual para ADMIN por correo corporativo
+   * Login por correo corporativo para ADMIN.
+   * - Normaliza correo
+   * - Busca usuario + roles
+   * - Verifica activo + rol ADMIN (por nombre O por id)
+   * - Firma JWT y devuelve { token, user }
    */
-  async adminLogin(email: string, ip?: string) {
-  // 1) Normaliza el correo recibido
-  const cleanEmail = (email ?? '').trim().toLowerCase();
-  console.log('[Auth] intento adminLogin', { emailIn: email, cleanEmail });
+  async adminLogin(email: string): Promise<LoginResult> {
+    if (!email || typeof email !== 'string') {
+      throw new UnauthorizedException('Correo inválido');
+    }
+    const correo = email.trim().toLowerCase();
 
-  // 2) Busca insensible a mayúsculas/minúsculas y con estado=true
-  const user = await this.prisma.usuario.findFirst({
-    where: {
-      correo: { equals: cleanEmail, mode: 'insensitive' },
-      estado: true,
-    },
-    include: {
-      usuario_rol: { include: { rol: true } },
-      usuario_tienda: { include: { tienda: true } },
-    },
-  });
-
-  if (!user) {
-    await this.safeLog(
-      'LOGIN_ADMIN_FAIL',
-      `Usuario no encontrado | correo=${cleanEmail} | ip=${ip ?? 'desconocida'}`,
-    );
-    throw new UnauthorizedException('Usuario no autorizado.');
-  }
-
-  // 3) Normaliza roles (lowercase + trim)
-  const rolesNorm = (user.usuario_rol ?? [])
-    .map((ur: any) => (ur.rol?.nombre_rol ?? '').toString().toLowerCase().trim())
-    .filter(Boolean);
-
-  const esAdmin = rolesNorm.includes('admin');
-
-  // Log de diagnóstico
-  console.log('[Auth] roles encontrados', {
-    raw: (user.usuario_rol ?? []).map((ur: any) => ur.rol?.nombre_rol),
-    norm: rolesNorm,
-    esAdmin,
-  });
-
-  if (!esAdmin) {
-    await this.safeLog(
-      'LOGIN_ADMIN_DENY',
-      `Usuario sin rol ADMIN | correo=${user.correo} | roles=${rolesNorm.join(',')} | ip=${ip ?? 'desconocida'}`,
-    );
-    throw new ForbiddenException('Acceso restringido a usuarios con rol ADMIN.');
-  }
-
-  // 4) Construye el payload con datos normalizados
-  const payload = this.buildPayloadFromUser(user);
-
-  // 5) Firma el JWT con vars .env
-  const token = await this.jwt.signAsync(payload, {
-    secret: (process.env.JWT_SECRET as string) ?? 'secret',
-    expiresIn: process.env.JWT_EXPIRES_IN ?? '1d',
-  });
-
-  // 6) Log informativo (usa solo campos del modelo correo_log)
-  await this.safeLog(
-    'LOGIN_ADMIN',
-    `Login ADMIN manual | correo=${user.correo} | ip=${ip ?? 'desconocida'}`,
-  );
-
-  return { token, user: payload };
-}
-
-  /**
-   * Devuelve el perfil normalizado desde DB
-   */
-  async getProfile(id_usuario: number) {
-    const user = await this.prisma.usuario.findUnique({
-      where: { id_usuario },
+    // === 1) Traer usuario con roles ===
+    const usuario = await this.prisma.usuario.findUnique({
+      where: { correo },
       include: {
-        usuario_rol: { include: { rol: true } },
-        usuario_tienda: { include: { tienda: true } },
+        usuario_rol: {
+          include: {
+            rol: true, // relación rol
+          },
+        },
+        // tienda: true, // descomenta si tienes relación tienda
       },
     });
-    if (!user) return null;
-    return this.buildPayloadFromUser(user);
-  }
 
-  /**
-   * Construye el payload a partir del usuario de BD
-   */
-  private buildPayloadFromUser(user: any): JwtPayload {
-    const nombreTienda =
-      user?.usuario_tienda &&
-      Array.isArray(user.usuario_tienda) &&
-      user.usuario_tienda.length > 0 &&
-      user.usuario_tienda[0]?.tienda
-        ? user.usuario_tienda[0].tienda.nombre
-        : undefined;
+    if (!usuario) throw new UnauthorizedException('Usuario no encontrado');
 
-    const rolesNorm = (user.usuario_rol ?? [])
-      .map((ur: any) => ur.rol?.nombre_rol?.toLowerCase?.() ?? '')
-      .filter(Boolean);
+    // Si manejas estado/activo
+    if (typeof (usuario as any).estado === 'boolean' && !(usuario as any).estado) {
+      throw new ForbiddenException('Usuario inactivo');
+    }
 
-    const esAdmin = rolesNorm.includes('admin');
-    const esNomina = rolesNorm.includes('nomina');
+    // === 2) Extraer strings de rol y también IDs ===
+    const ROLE_STRING_FIELDS = [
+      'nombre',
+      'name',
+      'titulo',
+      'title',
+      'rol',
+      'rolNombre',
+      'tipo',
+      'tipoRol',
+      'userRoleTitle', // <- he visto que te sale así en la respuesta
+    ];
+
+    const roleNamesRaw: string[] = [];
+    const roleIds: number[] = [];
+
+    for (const ur of (usuario as any).usuario_rol ?? []) {
+      // Posibles IDs en la intermedia
+      const idRol = ur?.id_rol ?? ur?.rol_id ?? ur?.idRol ?? ur?.rolId;
+      if (typeof idRol === 'number') roleIds.push(idRol);
+
+      // Strings posibles en la intermedia
+      roleNamesRaw.push(...pickStrings(ur, ROLE_STRING_FIELDS));
+
+      // Strings del objeto rol relacionado
+      if (ur?.rol) roleNamesRaw.push(...pickStrings(ur.rol, ROLE_STRING_FIELDS));
+    }
+
+    const rolesRaw = uniq(roleNamesRaw.filter(Boolean));
+    const rolesNorm = rolesRaw.map((r) => r.toLowerCase().trim());
+
+    // === 3) Fallback por IDs de rol ===
+    // Puedes configurar por env, por ejemplo ADMIN_ROLE_IDS="6,1"
+    const ADMIN_ROLE_IDS = (process.env.ADMIN_ROLE_IDS ?? '6')
+      .split(',')
+      .map((x) => Number(x.trim()))
+      .filter((n) => Number.isFinite(n));
+
+    const esAdminByName =
+      rolesNorm.includes('admin') ||
+      rolesNorm.includes('administrador') ||
+      rolesNorm.includes('administrator');
+
+    const esAdminById = roleIds.some((id) => ADMIN_ROLE_IDS.includes(id));
+
+    const esAdmin = esAdminByName || esAdminById;
+
+    const esNomina =
+      rolesNorm.includes('nomina') ||
+      rolesNorm.includes('nómina') ||
+      rolesNorm.includes('payroll');
+
     const esJefe =
       rolesNorm.includes('jefe') ||
-      rolesNorm.includes('jefe_tienda') ||
-      rolesNorm.includes('jefe tienda');
+      rolesNorm.includes('manager') ||
+      rolesNorm.includes('líder') ||
+      rolesNorm.includes('lider');
 
-    const rolPrincipal = esAdmin
-      ? 'ADMIN'
-      : rolesNorm[0]
-      ? rolesNorm[0].toUpperCase()
-      : 'USUARIO';
+    if (!esAdmin) {
+      // Deja este log mientras pruebas (luego puedes quitarlo)
+      console.warn('[Auth] Rol ADMIN no detectado', {
+        correo,
+        roleIds,
+        ADMIN_ROLE_IDS,
+        rolesRaw,
+        rolesNorm,
+      });
+      throw new ForbiddenException('No tiene rol ADMIN');
+    }
 
-    const panelTitle = esAdmin
-      ? 'Administrador'
-      : esNomina
-      ? 'Nómina'
-      : esJefe
-      ? 'Jefe'
-      : 'Usuario';
+    // === 4) Armar usuario seguro ===
+    const id =
+      (usuario as any).id ??
+      (usuario as any).id_usuario ??
+      (usuario as any).usuario_id;
 
-    return {
-      id_usuario: user.id_usuario,
-      correo: user.correo,
-      nombre: user.nombre,
-      rol: rolPrincipal,
+    const nombre =
+      (usuario as any).nombre ??
+      (usuario as any).nombres ??
+      (usuario as any).name ??
+      (usuario as any).fullName ??
+      '';
+
+    const tiendaNombre =
+      (usuario as any)?.tienda?.nombre ??
+      (usuario as any)?.tiendaNombre ??
+      null;
+
+    const user: SafeUser = {
+      id: Number(id),
+      nombre: String(nombre || ''),
+      correo,
       esAdmin,
       esNomina,
       esJefe,
-      panelTitle,
-      userRoleTitle: panelTitle,
-      nombreTienda,
+      roles: rolesRaw,
+      tiendaNombre,
     };
-  }
 
-  /**
-   * Crea un registro en correo_log usando el modelo real
-   * estado_envio: varchar(50)
-   * mensaje_error: string libre
-   */
-  private async safeLog(estado_envio: string, mensaje: string) {
-    try {
-      await this.prisma.correo_log.create({
-        data: {
-          estado_envio: estado_envio.slice(0, 50),
-          mensaje_error: mensaje,
-          // fecha_envio se asigna por @default(now())
-          // id_notificacion se deja nulo si no aplica
-        },
-      });
-    } catch {
-      // No romper el flujo si el log falla
-    }
+    // === 5) JWT con flags ===
+    const payload = {
+      id: user.id,
+      nombre: user.nombre,
+      correo: user.correo,
+      esAdmin: user.esAdmin,
+      esNomina: user.esNomina,
+      esJefe: user.esJefe,
+      roles: user.roles,
+      tiendaNombre: user.tiendaNombre ?? null,
+    };
+
+    const token = await this.jwt.signAsync(payload);
+
+    return { token, user };
   }
 }

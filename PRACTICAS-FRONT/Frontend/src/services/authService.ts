@@ -1,17 +1,18 @@
-import axios from 'axios';
+import http from './http';
 
-axios.defaults.withCredentials = true;
+// Login ADMIN por correo
+export async function adminLogin(email: string) {
+  const { data } = await http.post('/auth/admin-login', { email });
+  return data; // { message: 'ok', user }
+}
 
-const API_URL = import.meta.env.VITE_API_URL as string;
+// Perfil con cookie
+export async function getProfile() {
+  const { data } = await http.get('/auth/profile');
+  return data; // { user }
+}
 
-// (si más adelante vuelves a usar Google, este queda listo)
-export const loginWithGoogle = async (idToken: string) => {
-  const { data } = await axios.post(`${API_URL}/auth/google`, { token: idToken });
-  return data; // { user, token }
-};
-
-// ← Login por correo (ADMIN)
-export const adminLogin = async (email: string) => {
-  const { data } = await axios.post(`${API_URL}/auth/admin-login`, { email });
-  return data; // { user, token }
-};
+// Logout
+export async function doLogout() {
+  await http.post('/auth/logout', {});
+}
