@@ -47,13 +47,13 @@ export default function AuthProvider({ children }: Props) {
   }, []);
 
   const login = async (email: string): Promise<User> => {
-    const res = await fetch(`${API_URL}/auth/admin-login`, {
+    const res = await fetch(`${API_URL}/auth/login`, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email }),
     });
-    if (!res.ok) throw new Error(`admin-login falló (${res.status})`);
+    if (!res.ok) throw new Error(`login falló (${res.status})`);
 
     const me = await fetch(`${API_URL}/auth/profile`, { credentials: 'include' });
     if (!me.ok) throw new Error(`profile falló (${me.status})`);
