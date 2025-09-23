@@ -562,104 +562,86 @@ export class NovedadeService {
 
   async obtenerNovedadesPendientesParaNomina(filtros: FiltrosParaNomina = {}) {
     const whereCondition: Record<string, any> = {
-      estado_novedad: {
-        nombre_estado: 'CREADA',
-      },
+      estado_novedad: { nombre_estado: 'CREADA' },
     };
 
-    // Filtro por tipo
+    // Filtros existentes (tipo, tienda, fecha) ...
     if (filtros.tipo) {
       whereCondition.tipo_novedad = {
-        nombre_tipo: {
-          equals: filtros.tipo,
-          mode: 'insensitive',
-        },
+        nombre_tipo: { equals: filtros.tipo, mode: 'insensitive' },
       };
     }
-
-    // Filtro por tienda
     if (filtros.tienda) {
       whereCondition.usuario = {
         usuario_tienda: {
           some: {
-            tienda: {
-              nombre_tienda: {
-                equals: filtros.tienda,
-                mode: 'insensitive',
-              },
-            },
+            tienda: { nombre_tienda: { equals: filtros.tienda, mode: 'insensitive' } },
           },
         },
       };
     }
-
-    //Filtro por fecha de creación
     if (filtros.fecha) {
       const fechaFiltro: { gte?: Date; lte?: Date } = {};
-
       if (filtros.fecha.gte) {
         const gte = new Date(filtros.fecha.gte);
-        fechaFiltro.gte = new Date(
-          gte.getFullYear(),
-          gte.getMonth(),
-          gte.getDate(),
-          0,
-          0,
-          0,
-          0,
-        );
+        fechaFiltro.gte = new Date(gte.getFullYear(), gte.getMonth(), gte.getDate(), 0, 0, 0, 0);
       }
-
       if (filtros.fecha.lte) {
         const lte = new Date(filtros.fecha.lte);
-        fechaFiltro.lte = new Date(
-          lte.getFullYear(),
-          lte.getMonth(),
-          lte.getDate(),
-          23,
-          59,
-          59,
-          999,
-        );
+        fechaFiltro.lte = new Date(lte.getFullYear(), lte.getMonth(), lte.getDate(), 23, 59, 59, 999);
       }
-
       if (fechaFiltro.gte || fechaFiltro.lte) {
         whereCondition.fecha_creacion = fechaFiltro;
       }
     }
 
+    // === NUEVO: si viene cédula, buscamos los IDs de novedad en la tabla de detalle ===
+    if (filtros.cedula) {
+      const detalleWhere: Record<string, any> = { cedula: filtros.cedula };
+
+      // opcional: alinear filtros de tienda/tipo/fecha con la tabla de detalle
+      if (filtros.tienda) detalleWhere.tienda = { equals: filtros.tienda, mode: 'insensitive' };
+      if (filtros.tipo) detalleWhere.categoria = { equals: filtros.tipo, mode: 'insensitive' };
+      if (filtros.fecha) {
+        const fechaFiltro: { gte?: Date; lte?: Date } = {};
+        if (filtros.fecha.gte) {
+          const d = filtros.fecha.gte;
+          fechaFiltro.gte = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
+        }
+        if (filtros.fecha.lte) {
+          const d = filtros.fecha.lte;
+          fechaFiltro.lte = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
+        }
+        if (fechaFiltro.gte || fechaFiltro.lte) detalleWhere.fecha = fechaFiltro;
+      }
+
+      const ids = await this.prisma.detalleNovedadMasiva.findMany({
+        where: detalleWhere,
+        select: { id_novedad: true },
+        distinct: ['id_novedad'],
+      });
+
+      const idsSet = ids.map(r => r.id_novedad);
+      // si no hay coincidencias, devolvemos vacío de una vez
+      if (idsSet.length === 0) return [];
+
+      whereCondition.id_novedad = { in: idsSet };
+    }
+
     return this.prisma.novedad.findMany({
       where: whereCondition,
-      orderBy: {
-        id_novedad: 'desc',
-      },
+      orderBy: { id_novedad: 'desc' },
       select: {
         id_novedad: true,
         descripcion: true,
         fecha_creacion: true,
         es_masiva: true,
         cantidad_solicitudes: true,
-        estado_novedad: {
-          select: {
-            nombre_estado: true,
-          },
-        },
-        tipo_novedad: {
-          select: {
-            nombre_tipo: true,
-          },
-        },
+        estado_novedad: { select: { nombre_estado: true } },
+        tipo_novedad: { select: { nombre_tipo: true } },
         usuario: {
           select: {
-            usuario_tienda: {
-              select: {
-                tienda: {
-                  select: {
-                    nombre_tienda: true,
-                  },
-                },
-              },
-            },
+            usuario_tienda: { select: { tienda: { select: { nombre_tienda: true } } } },
           },
         },
       },
@@ -793,52 +775,63 @@ export class NovedadeService {
   }
 
   async obtenerTodasNovedadesParaNomina(filtros: FiltrosParaNomina) {
+    const whereCondition: Record<string, any> = {
+      ...(filtros.tienda && {
+        usuario: {
+          usuario_tienda: {
+            some: {
+              tienda: { nombre_tienda: { contains: filtros.tienda, mode: 'insensitive' } },
+            },
+          },
+        },
+      }),
+      ...(filtros.tipo && {
+        tipo_novedad: { nombre_tipo: { contains: filtros.tipo, mode: 'insensitive' } },
+      }),
+      ...(filtros.fecha && { fecha_creacion: filtros.fecha }),
+    };
+
+    // === NUEVO: filtrar por cédula a través de la tabla de detalle ===
+    if (filtros.cedula) {
+      const detalleWhere: Record<string, any> = { cedula: filtros.cedula };
+      if (filtros.tienda) detalleWhere.tienda = { contains: filtros.tienda, mode: 'insensitive' };
+      if (filtros.tipo) detalleWhere.categoria = { contains: filtros.tipo, mode: 'insensitive' };
+      if (filtros.fecha) {
+        const fechaFiltro: { gte?: Date; lte?: Date } = {};
+        if (filtros.fecha.gte) {
+          const d = filtros.fecha.gte;
+          fechaFiltro.gte = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
+        }
+        if (filtros.fecha.lte) {
+          const d = filtros.fecha.lte;
+          fechaFiltro.lte = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
+        }
+        if (fechaFiltro.gte || fechaFiltro.lte) detalleWhere.fecha = fechaFiltro;
+      }
+
+      const ids = await this.prisma.detalleNovedadMasiva.findMany({
+        where: detalleWhere,
+        select: { id_novedad: true },
+        distinct: ['id_novedad'],
+      });
+      const idsSet = ids.map(r => r.id_novedad);
+      if (idsSet.length === 0) return [];
+      whereCondition.id_novedad = { in: idsSet };
+    }
+
     return this.prisma.novedad.findMany({
-      where: {
-        ...(filtros.tienda && {
-          usuario: {
-            usuario_tienda: {
-              some: {
-                tienda: {
-                  nombre_tienda: {
-                    contains: filtros.tienda,
-                    mode: 'insensitive',
-                  },
-                },
-              },
-            },
-          },
-        }),
-        ...(filtros.tipo && {
-          tipo_novedad: {
-            nombre_tipo: {
-              contains: filtros.tipo,
-              mode: 'insensitive',
-            },
-          },
-        }),
-        ...(filtros.fecha && {
-          fecha_creacion: filtros.fecha,
-        }),
-      },
+      where: whereCondition,
       include: {
         estado_novedad: true,
         tipo_novedad: true,
         usuario: {
-          include: {
-            usuario_tienda: {
-              include: {
-                tienda: true,
-              },
-            },
-          },
+          include: { usuario_tienda: { include: { tienda: true } } },
         },
       },
-      orderBy: {
-        id_novedad: 'desc',
-      },
+      orderBy: { id_novedad: 'desc' },
     });
   }
+
 
   async obtenerDetallesPendientesParaNomina(filtros: FiltrosParaNomina = {}) {
     const whereCondition: Record<string, any> = {

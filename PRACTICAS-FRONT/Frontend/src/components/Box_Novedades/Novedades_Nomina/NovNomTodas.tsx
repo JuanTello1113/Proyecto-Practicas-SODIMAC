@@ -43,6 +43,7 @@ interface Props {
     tipo: string;
     desde: string;
     hasta: string;
+    cedula?: string;   
   };
   estado?: string;
   onCantidadChange?: (cantidad: number) => void;

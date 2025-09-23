@@ -236,11 +236,16 @@ export class NovedadController {
     @Query('tipo') tipo?: string,
     @Query('desde') desde?: string,
     @Query('hasta') hasta?: string,
+    @Query('cedula') cedula?: string,   // <-- NUEVO
   ) {
     const filtros: FiltrosParaNomina = {};
 
     if (tienda) filtros.tienda = tienda;
     if (tipo) filtros.tipo = tipo;
+
+    if (cedula && !isNaN(Number(cedula))) {
+      filtros.cedula = Number(cedula);  // <-- NUEVO
+    }
 
     if (desde || hasta) {
       const gte = desde ? new Date(desde) : undefined;
@@ -249,19 +254,10 @@ export class NovedadController {
       if (gte && !isNaN(gte.getTime())) {
         filtros.fecha = { ...filtros.fecha, gte };
       }
-
       if (lte && !isNaN(lte.getTime())) {
         filtros.fecha = {
           ...filtros.fecha,
-          lte: new Date(
-            lte.getFullYear(),
-            lte.getMonth(),
-            lte.getDate(),
-            23,
-            59,
-            59,
-            999,
-          ),
+          lte: new Date(lte.getFullYear(), lte.getMonth(), lte.getDate(), 23, 59, 59, 999),
         };
       }
     }
@@ -275,11 +271,16 @@ export class NovedadController {
     @Query('tipo') tipo?: string,
     @Query('desde') desde?: string,
     @Query('hasta') hasta?: string,
+    @Query('cedula') cedula?: string,   // <-- NUEVO
   ) {
     const filtros: FiltrosParaNomina = {};
 
     if (tienda) filtros.tienda = tienda;
     if (tipo) filtros.tipo = tipo;
+
+    if (cedula && !isNaN(Number(cedula))) {
+      filtros.cedula = Number(cedula);  // <-- NUEVO
+    }
 
     if (desde || hasta) {
       const gte = desde ? new Date(desde) : undefined;
@@ -288,19 +289,10 @@ export class NovedadController {
       if (gte && !isNaN(gte.getTime())) {
         filtros.fecha = { ...filtros.fecha, gte };
       }
-
       if (lte && !isNaN(lte.getTime())) {
         filtros.fecha = {
           ...filtros.fecha,
-          lte: new Date(
-            lte.getFullYear(),
-            lte.getMonth(),
-            lte.getDate(),
-            23,
-            59,
-            59,
-            999,
-          ),
+          lte: new Date(lte.getFullYear(), lte.getMonth(), lte.getDate(), 23, 59, 59, 999),
         };
       }
     }
