@@ -8,6 +8,7 @@ import {
   Patch,
   Post,
   Put,
+  ParseIntPipe,
 } from '@nestjs/common';
 import { UsuarioService } from '../services/usuario.service';
 
@@ -15,11 +16,13 @@ interface CrearUsuarioInput {
   nombre: string;
   correo: string;
   rol: string;
-  tienda?: string; // solo si aplica
+  tienda?: string;
 }
 
 interface EditarUsuario {
-  nuevoRolId: number;
+  nombre?: string;
+  correo?: string;
+  nuevoRolId?: number;
   idTienda?: number;
 }
 
@@ -29,47 +32,66 @@ export class UsuarioController {
 
   // Crear usuario
   @Post()
-  async crearUsuario(@Body() body: CrearUsuarioInput) {
+  crearUsuario(@Body() body: CrearUsuarioInput) {
     return this.usuarioService.crearUsuario(body);
   }
 
-  //todos los usuarios
+  // Listar
   @Get('listar')
-  async listarUsuarios() {
+  listarUsuarios() {
     return this.usuarioService.listarUsuarios();
   }
 
-  //  Obtener usuario por ID
+  // Obtener por id
   @Get(':id')
-  async findByID(@Param('id') id: string) {
-    return this.usuarioService.findById(+id);
+  findByID(@Param('id', ParseIntPipe) id: number) {
+    return this.usuarioService.findById(id);
   }
 
-  // Verificar si email ya existe
+  // Validar email
   @Get(':email/validar')
-  async validarEmail(@Param('email') email: string) {
+  validarEmail(@Param('email') email: string) {
     return this.usuarioService.validarEmail(email);
   }
 
-  // Obtener roles y tiendas
+  // Obtener roles/tiendas
   @Get()
-  async obtenerRolesYTiendas() {
+  obtenerRolesYTiendas() {
     return this.usuarioService.obtenerRolesYTiendas();
   }
 
-  //editar por ID
+  // ===== Rutas antiguas (compatibilidad) =====
   @Put(':id/editar')
-  async editarUsuario(@Param('id') id: string, @Body() body: EditarUsuario) {
-    return this.usuarioService.editarUsuario(+id, body);
+  editarUsuarioLegacy(@Param('id', ParseIntPipe) id: number, @Body() body: EditarUsuario) {
+    return this.usuarioService.editarUsuario(id, body);
   }
 
   @Delete(':id/eliminar')
-  async eliminarUsuario(@Param('id') id: string) {
-    return this.usuarioService.eliminarUsuario(+id);
+  eliminarUsuarioLegacy(@Param('id', ParseIntPipe) id: number) {
+    return this.usuarioService.eliminarUsuario(id);
   }
 
   @Patch(':id/desactivar')
-  async desactivarUsuario(@Param('id') id: string) {
-    return this.usuarioService.desactivarUsuario(+id);
+  desactivarUsuarioLegacy(@Param('id', ParseIntPipe) id: number) {
+    return this.usuarioService.desactivarUsuario(id);
+  }
+
+  // ===== Rutas nuevas que usa el frontend =====
+  @Patch(':id')
+  editarUsuario(@Param('id', ParseIntPipe) id: number, @Body() body: EditarUsuario) {
+    return this.usuarioService.editarUsuario(id, body);
+  }
+
+  @Patch(':id/estado')
+  cambiarEstado(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { activo: boolean },
+  ) {
+    return this.usuarioService.cambiarEstadoUsuario(id, body.activo);
+  }
+
+  @Delete(':id')
+  eliminarUsuario(@Param('id', ParseIntPipe) id: number) {
+    return this.usuarioService.eliminarUsuario(id);
   }
 }

@@ -5,17 +5,14 @@ import { AppModule } from './app/app.module';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 
 async function bootstrap() {
-  // Desactiva CORS aquí; abajo lo configuramos manualmente
   const app = await NestFactory.create(AppModule, { cors: false });
 
-  // Si corres detrás de un proxy (Nginx, etc.)
+  // proxy (nginx/heroku/etc)
   const expressApp = app.getHttpAdapter().getInstance();
   expressApp.set('trust proxy', 1);
 
-  // Cookies httpOnly
   app.use(cookieParser());
 
-  // Orígenes permitidos para el front (Vite)
   const frontendOrigins: string[] = [
     'http://localhost:5173',
     'http://127.0.0.1:5173',
@@ -24,19 +21,17 @@ async function bootstrap() {
     frontendOrigins.push(process.env.FRONTEND_URL.trim());
   }
 
-  // CORS para credentials (cookies) y pruebas locales (origin null permitido)
   app.enableCors({
-    origin: (origin, callback) => {
-      if (!origin) return callback(null, true);
-      if (frontendOrigins.includes(origin)) return callback(null, true);
-      return callback(new Error(`Not allowed by CORS: ${origin}`), false);
+    origin: (origin, cb) => {
+      if (!origin) return cb(null, true);
+      if (frontendOrigins.includes(origin)) return cb(null, true);
+      return cb(new Error(`Not allowed by CORS: ${origin}`), false);
     },
     credentials: true,
     methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   });
 
-  // Swagger
   const config = new DocumentBuilder()
     .setTitle('Sistema Nomina')
     .setDescription('Documentación de Nomina')
@@ -48,5 +43,4 @@ async function bootstrap() {
 
   await app.listen(3000);
 }
-
 bootstrap().catch(console.error);
