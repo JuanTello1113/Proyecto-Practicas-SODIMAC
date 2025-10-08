@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import axios from 'axios';
-import { Row, Workbook } from 'exceljs';
+import ExcelJS, { Row } from 'exceljs';
 import * as FormData from 'form-data';
 import * as fsSync from 'fs';
 import * as fs from 'fs/promises';
@@ -172,7 +172,8 @@ export class ArchivoAdjuntoService {
       }
 
       const fileBuffer = await fs.readFile(plantillaPath);
-      const workbook = new Workbook();
+      const workbook = new ExcelJS.Workbook();
+      // @ts-ignore – ExcelJS acepta un Buffer pero las definiciones de tipos no son compatibles
       await workbook.xlsx.load(fileBuffer);
       const worksheet = workbook.getWorksheet(1);
 
@@ -373,7 +374,8 @@ export class ArchivoAdjuntoService {
     id_novedad: number,
   ): Promise<void> {
     try {
-      const workbook = new Workbook();
+      const workbook = new ExcelJS.Workbook();
+      // @ts-ignore – ExcelJS acepta un Buffer pero las definiciones de tipos no son compatibles
       await workbook.xlsx.load(buffer);
       console.log('✅ Archivo Excel cargado correctamente');
 
@@ -816,7 +818,8 @@ export class ArchivoAdjuntoService {
       await fs.access(plantillaPath);
       const buf = await fs.readFile(plantillaPath);
 
-      const workbook = new Workbook();
+      const workbook = new ExcelJS.Workbook();
+      // @ts-ignore – ExcelJS acepta un Buffer pero las definiciones de tipos no son compatibles
       await workbook.xlsx.load(buf);
       const sheet = workbook.getWorksheet(1);
 
@@ -1030,7 +1033,8 @@ export class ArchivoAdjuntoService {
     );
 
     const buf = await fs.readFile(plantillaPath);
-    const workbook = new Workbook();
+    const workbook = new ExcelJS.Workbook();
+    // @ts-ignore – ExcelJS acepta un Buffer pero las definiciones de tipos no son compatibles
     await workbook.xlsx.load(buf);
     const sheet = workbook.getWorksheet(1);
 
@@ -1084,7 +1088,8 @@ export class ArchivoAdjuntoService {
   async procesarArchivoRespuestas(
     fileBuffer: Buffer,
   ): Promise<{ actualizados: number }> {
-    const workbook = new Workbook();
+    const workbook = new ExcelJS.Workbook();
+    // @ts-ignore – ExcelJS acepta un Buffer pero las definiciones de tipos no son compatibles
     await workbook.xlsx.load(fileBuffer);
     const sheet = workbook.getWorksheet(1);
 
